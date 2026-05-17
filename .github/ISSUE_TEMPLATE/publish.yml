@@ -1,0 +1,51 @@
+name: Publish request
+description: Request publication of a Lake package to the registry
+title: "publish: <name> <version>"
+labels: ["publish"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Package name
+      placeholder: marine
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: git
+    attributes:
+      label: Git URL
+      placeholder: https://github.com/<user>/<repo>.git
+    validations:
+      required: true
+  - type: input
+    id: rev
+    attributes:
+      label: Git ref (tag / branch / SHA)
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      placeholder: One-line description of the package + use case.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Confirmations
+      options:
+        - label: The git URL is publicly clone-able.
+          required: true
+        - label: The ref above is stable (tag or pinned commit).
+          required: true
+        - label: I have read the registry README format.
+          required: true

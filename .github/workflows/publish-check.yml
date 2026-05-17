@@ -1,0 +1,97 @@
+name: publish-check
+
+on:
+  pull_request:
+    paths:
+      - 'packages/**/*.lake'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed manifests
+        id: changed
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          git fetch origin "$base"
+          files=$(git diff --name-only "$base"..."$head" -- 'packages/**/*.lake')
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$files"     >> "$GITHUB_OUTPUT"
+          echo "EOF"        >> "$GITHUB_OUTPUT"
+
+      - name: Validate each changed manifest
+        run: |
+          set -e
+          files="${{ steps.changed.outputs.files }}"
+          [ -z "$files" ] && { echo "no manifest changes"; exit 0; }
+
+          fail=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "=== $f ==="
+
+            # Filename convention.
+            base=$(basename "$f" .lake)
+            shard=$(dirname "$f" | awk -F/ '{print $NF}')
+            first_letter=$(printf %s "$base" | head -c1 | tr 'A-Z' 'a-z')
+            case "$first_letter" in
+              [a-z]) want_shard="$first_letter" ;;
+              *)     want_shard=_ ;;
+            esac
+            if [ "$shard" != "$want_shard" ]; then
+              echo "  ✗ wrong shard dir: have '$shard', want '$want_shard'"; fail=1; continue
+            fi
+
+            # Required: package "<name>" matching filename.
+            pkg_line=$(grep -E '^package +"' "$f" | head -1 || true)
+            if [ -z "$pkg_line" ]; then
+              echo "  ✗ missing 'package \"<name>\"' line"; fail=1; continue
+            fi
+            pkg_name=$(printf %s "$pkg_line" | sed -nE 's/^package +"([^"]+)".*/\1/p')
+            if [ "$pkg_name" != "$base" ]; then
+              echo "  ✗ package name '$pkg_name' ≠ filename '$base'"; fail=1
+            fi
+
+            # At least one version line; no duplicate version strings.
+            version_count=$(grep -cE '^version +"' "$f" || true)
+            if [ "$version_count" -lt 1 ]; then
+              echo "  ✗ no version line"; fail=1; continue
+            fi
+            dup=$(grep -E '^version +"' "$f" | sed -nE 's/^version +"([^"]+)".*/\1/p' | sort | uniq -d)
+            if [ -n "$dup" ]; then
+              echo "  ✗ duplicate version(s): $dup"; fail=1
+            fi
+
+            # Each version line must have git "<url>" rev "<ref>".
+            while IFS= read -r v; do
+              if ! printf %s "$v" | grep -qE '^version +"[^"]+" +git +"[^"]+" +rev +"[^"]+"'; then
+                echo "  ✗ malformed version line: $v"; fail=1
+              fi
+            done < <(grep -E '^version +"' "$f")
+
+            # Smoke-clone each NEW (added-by-this-PR) version to confirm
+            # the URL+ref pair actually exists upstream.
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            git show "$base_sha:$f" > /tmp/old.lake 2>/dev/null || : > /tmp/old.lake
+            comm -23 \
+              <(grep -E '^version +"' "$f"      | sort -u) \
+              <(grep -E '^version +"' /tmp/old.lake | sort -u) \
+            | while IFS= read -r newline; do
+                url=$(printf %s "$newline" | sed -nE 's/.*git +"([^"]+)".*/\1/p')
+                ref=$(printf %s "$newline" | sed -nE 's/.*rev +"([^"]+)".*/\1/p')
+                printf "  → clone %s @ %s ... " "$url" "$ref"
+                if git ls-remote --exit-code "$url" "$ref" >/dev/null 2>&1; then
+                  echo "ok (ref exists on remote)"
+                else
+                  echo "FAIL (ref not found on remote)"
+                  fail=1
+                fi
+              done
+
+            echo "  ✓ $f"
+          done <<< "$files"
+
+          exit $fail
