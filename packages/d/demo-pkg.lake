@@ -1,0 +1,4 @@
+package "demo-pkg"
+description "Tiny e2e test package for lake-registry"
+
+version "0.0.1" git "file:///tmp/demo-pkg" rev "8c8f8501bbfee69f66570bd1b17fae95f1b917c3"
