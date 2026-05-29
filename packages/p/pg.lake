@@ -1,0 +1,2 @@
+package "pg"
+version "0.1.0" git "https://github.com/morphqdd/lake-pg.git" rev "9090406bab06db72d1259e7d4c4ea0bf66cf2b3f"
